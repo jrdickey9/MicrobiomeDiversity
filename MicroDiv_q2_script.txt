@@ -1,0 +1,142 @@
+#activate conda
+conda activate qiime2
+
+#imports as EMP paired end seqs
+qiime tools import \
+--type 'EMPPairedEndSequences' \
+--input-path RawSeqData1 \
+--output-path emp-paired-end-sequences.qza
+
+#demultiplex #first run, no reads mapped to sequences
+qiime demux emp-paired \
+--m-barcodes-file sample-metadata.tsv \
+--m-barcodes-column barcode_sequence \
+--i-seqs emp-paired-end-sequences.qza \  
+--o-per-sample-sequences demux-full.qza \
+--o-error-correction-details demux.details.qza
+
+#second run, demultiplexed, reads mapped without golay correction. #notes: median number of forward and rev reads = 21,938. Total number=697,613 
+
+qiime demux emp-paired \
+--m-barcodes-file sample-metadata.tsv \
+--m-barcodes-column barcode_sequence \
+--p-no-golay-error-correction \
+--i-seqs emp-paired-end-sequences.qza \  
+--o-per-sample-sequences demux-full.qza \
+--o-error-correction-details demux.details.qza 
+
+#OK moving on, next step in Sara's script: quality filter based on Q scores 
+qiime quality-filter q-score \
+ --i-demux demux-full.qza \
+ --o-filtered-sequences demux-filtered.qza \
+ --o-filter-stats demux-filter-stats.qza
+
+#view
+qiime metadata tabulate \
+--m-input-file demux-filter-stats.qza \
+--o-visualization demux-filter-stats.qzv
+
+#ok moving on-- might need to adjust trim length. Qiita pipeline was at 100. 
+qiime deblur denoise-16S \
+  --i-demultiplexed-seqs demux-filtered.qza \
+  --p-trim-length 120 \
+  --o-representative-sequences rep-seqs-deblur_seq.qza \
+  --o-table table-deblur_seq.qza \
+  --p-sample-stats \
+  --o-stats deblur-stats_seq.qza
+
+#view
+qiime deblur visualize-stats \
+  --i-deblur-stats deblur-stats_seq.qza \
+  --o-visualization deblur-stats_seq.qzv
+
+#Adjust trim length, just curious. 
+qiime deblur denoise-16S \
+  --i-demultiplexed-seqs demux-filtered.qza \
+  --p-trim-length 100 \
+  --o-representative-sequences rep-seqs-deblur_seq100.qza \
+  --o-table table-deblur_seq100.qza \
+  --p-sample-stats \
+  --o-stats deblur-stats_seq100.qza
+
+#view
+qiime deblur visualize-stats \
+  --i-deblur-stats deblur-stats_seq100.qza \
+  --o-visualization deblur-stats_seq100.qzv
+
+#Assigning taxa with trim length 120. Make sure you are downloading the right classifier #for the qiime2 version you have installed. 
+#https://docs.qiime2.org/2020.8/data-resources/
+
+qiime feature-classifier classify-sklearn \
+  --i-classifier silva-138-99-515-806-nb-classifier.qza \
+  --i-reads rep-seqs-deblur_seq.qza \
+  --o-classification taxonomy_seq.qza
+
+#at this step; 9/19/23 #OK number of ASVs = 135 ... 
+qiime feature-table summarize \
+  --i-table table-deblur_seq.qza \
+  --o-visualization table_seq.qzv \
+  --m-sample-metadata-file sample-metadata.tsv
+
+#trying recommended dada2 from Atacama soil pipeline for demux data
+qiime2_files % qiime dada2 denoise-paired \   
+  --i-demultiplexed-seqs demux-full.qza \
+  --p-trunc-len-f 150 \                 
+  --p-trunc-len-r 150 \                       
+  --o-table DADA2table.qza \
+  --o-representative-sequences DADA2rep-seqs.qza \
+  --o-denoising-stats DADA2denoising-stats.qza
+
+qiime feature-table summarize \
+  --i-table DADA2table.qza \             
+  --o-visualization table_seqdada2.qzv \
+  --m-sample-metadata-file sample-metadata.tsv
+
+#moving forward with Dada2 data
+qiime feature-classifier classify-sklearn \
+  --i-classifier silva-138-99-515-806-nb-classifier.qza \
+  --i-reads DADA2rep-seqs.qza \
+  --o-classification taxonomy_seq.qza
+
+#Works!
+qiime tools export \
+  --input-path DADA2table.qza \
+  --output-path dadatable
+
+#Works
+qiime feature-table tabulate-seqs \
+  --i-data DADA2rep-seqs.qza \
+  --o-visualization DADA2rep-seqs.qzv
+
+#Works
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences DADA2rep-seqs.qza \
+  --o-alignment aligned-DADA2rep-seqs.qza \
+  --o-masked-alignment masked-aligned-DADA2rep-seqs.qza \
+  --o-tree unrooted-tree_DADA2rep-seqs.qza \
+  --o-rooted-tree rooted-tree_DADA2rep-seqs.qza
+
+qiime2_files % qiime tools export \
+--input-path rooted-tree_DADA2rep-seqs.qza \
+--output-path rooted-tree_DADA2rep-seqs.tre
+
+biom convert -i Dada2FeatTab.biom -o Dada2FeatTab.txt --to-tsv 
+
+qiime tools export \
+  --input-path taxonomy_seq.qza \
+  --output-path taxa
+
+#Extracting fastq for sra
+conda activate qiime2
+cd pathname
+chmod u+x generate_fastq.sh
+
+
+
+
+
+
+
+
+
+
